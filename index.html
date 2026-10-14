@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Тетрис</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    background: #111;
+    color: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  #top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+    background: #1a1a2e;
+    border-bottom: 2px solid #333;
+  }
+  #stats {
+    display: flex;
+    gap: 14px;
+    font-size: 14px;
+  }
+  #stats b { color: #0ff; }
+  #nextCanvas { background: #000; border: 1px solid #444; }
+  #newGameBtn {
+    background: #0ff;
+    color: #000;
+    border: none;
+    padding: 12px 16px;
+    font-size: 15px;
+    font-weight: bold;
+    border-radius: 8px;
+  }
+  #boardWrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: #0a0a12;
+  }
+  #board {
+    background: #000;
+    border: 2px solid #444;
+  }
+  #controls {
+    display: flex;
+    background: #1a1a2e;
+    padding: 10px;
+    gap: 8px;
+  }
+  .btn {
+    flex: 1;
+    background: #222;
+    color: #fff;
+    border: 2px solid #555;
+    border-radius: 10px;
+    padding: 18px 4px;
+    font-size: 22px;
+    font-weight: bold;
+  }
+  .btn:active { background: #0ff; color: #000; }
+  .overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.9);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    z-index: 10;
+  }
+  .overlay h1 { font-size: 32px; margin-bottom: 16px; color: #0ff; }
+  .overlay p { margin-bottom: 20px; line-height: 1.4; color: #ccc; }
+  .overlay button {
+    background: #0ff;
+    color: #000;
+    border: none;
+    padding: 16px 36px;
+    font-size: 18px;
+    font-weight: bold;
+    border-radius: 10px;
+  }
+  #errorBox {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    background: #a00;
+    color: #fff;
+    padding: 8px;
+    font-size: 12px;
+    display: none;
+    z-index: 100;
+    border-radius: 6px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top">
+    <div id="stats">
+      <div>Счёт<br><b id="score">0</b></div>
+      <div>Ур.<br><b id="level">1</b></div>
+      <div>Линии<br><b id="lines">0</b></div>
+    </div>
+    <canvas id="nextCanvas" width="60" height="60"></canvas>
+    <button id="newGameBtn">Новая игра</button>
+  </div>
+
+  <div id="boardWrap">
+    <canvas id="board" width="240" height="480"></canvas>
+    <div class="overlay" id="startOverlay">
+      <h1>ТЕТРИС</h1>
+      <p>Если открылось внутри мессенджера —<br>нажми «Открыть в браузере»<br>или скачай файл и открой в Chrome/Safari</p>
+      <button id="startBtn">Начать игру</button>
+    </div>
+    <div class="overlay" id="gameOverOverlay">
+      <h1>ИГРА ОКОНЧЕНА</h1>
+      <p>Счёт: <b id="finalScore">0</b></p>
+      <button id="againBtn">Играть снова</button>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button class="btn" id="leftBtn">←</button>
+    <button class="btn" id="rotateBtn">↻</button>
+    <button class="btn" id="rightBtn">→</button>
+    <button class="btn" id="downBtn">↓</button>
+  </div>
+</div>
+<div id="errorBox"></div>
+
+<script>
+(function() {
+  try {
+    var COLS = 10, ROWS = 20, BLOCK = 24;
+    var boardCanvas = document.getElementById('board');
+    var ctx = boardCanvas.getContext('2d');
+    var nextCanvas = document.getElementById('nextCanvas');
+    var nctx = nextCanvas.getContext('2d');
+
+    var COLORS = [null, '#0ff', '#00f', '#fa0', '#ff0', '#0f0', '#a0f', '#f00'];
+    var SHAPES = [
+      null,
+      [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+      [[2,0,0],[2,2,2],[0,0,0]],
+      [[0,0,3],[3,3,3],[0,0,0]],
+      [[4,4],[4,4]],
+      [[0,5,5],[5,5,0],[0,0,0]],
+      [[0,6,0],[6,6,6],[0,0,0]],
+      [[7,7,0],[0,7,7],[0,0,0]]
+    ];
+
+    var board, piece, next, score, lines, level, dropInterval, lastTime, dropCounter, running;
+
+    function createBoard() {
+      var b = [];
+      for (var y = 0; y < ROWS; y++) {
+        b[y] = [];
+        for (var x = 0; x < COLS; x++) b[y][x] = 0;
+      }
+      return b;
+    }
+
+    function randomPiece() {
+      var t = Math.floor(Math.random() * 7) + 1;
+      var s = SHAPES[t];
+      var shape = [];
+      for (var i = 0; i < s.length; i++) shape[i] = s[i].slice();
+      return { shape: shape, type: t, x: Math.floor((COLS - shape[0].length) / 2), y: 0 };
+    }
+
+    function collide() {
+      var sh = piece.shape;
+      for (var y = 0; y < sh.length; y++) {
+        for (var x = 0; x < sh[y].length; x++) {
+          if (sh[y][x]) {
+            var nx = piece.x + x, ny = piece.y + y;
+            if (nx < 0 || nx >= COLS || ny >= ROWS || (ny >= 0 && board[ny][nx])) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function merge() {
+      var sh = piece.shape;
+      for (var y = 0; y < sh.length; y++) {
+        for (var x = 0; x < sh[y].length; x++) {
+          if (sh[y][x] && piece.y + y >= 0) board[piece.y + y][piece.x + x] = sh[y][x];
+        }
+      }
+    }
+
+    function rotateMatrix(m) {
+      var rows = m.length;
+      var cols = m[0].length;
+      var r = [];
+      for (var x = 0; x < cols; x++) {
+        r[x] = [];
+        for (var y = rows - 1; y >= 0; y--) {
+          r[x][rows - 1 - y] = m[y][x];
+        }
+      }
+      return r;
+    }
+
+    function clearLines() {
+      var cleared = 0;
+      for (var y = ROWS - 1; y >= 0; y--) {
+        var full = true;
+        for (var x = 0; x < COLS; x++) if (!board[y][x]) { full = false; break; }
+        if (full) {
+          board.splice(y, 1);
+          var row = [];
+          for (var i = 0; i < COLS; i++) row[i] = 0;
+          board.unshift(row);
+          cleared++;
+          y++;
+        }
+      }
+      if (cleared) {
+        var pts = [0, 100, 300, 500, 800];
+        score += (pts[cleared] || 800) * level;
+        lines += cleared;
+        level = Math.floor(lines / 10) + 1;
+        dropInterval = Math.max(120, 1000 - (level - 1) * 70);
+        updateUI();
+      }
+    }
+
+    function drawBlock(c, x, y, color, size) {
+      c.fillStyle = color;
+      c.fillRect(x * size, y * size, size - 1, size - 1);
+    }
+
+    function resize() {
+      var wrap = document.getElementById('boardWrap');
+      var maxW = wrap.clientWidth - 10;
+      var maxH = wrap.clientHeight - 10;
+      BLOCK = Math.floor(Math.min(maxW / COLS, maxH / ROWS));
+      if (BLOCK < 10) BLOCK = 10;
+      boardCanvas.width = COLS * BLOCK;
+      boardCanvas.height = ROWS * BLOCK;
+      draw();
+    }
+
+    function draw() {
+      if (!board) return;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+      for (var y = 0; y < ROWS; y++) {
+        for (var x = 0; x < COLS; x++) {
+          if (board[y][x]) drawBlock(ctx, x, y, COLORS[board[y][x]], BLOCK);
+        }
+      }
+      if (piece) {
+        var sh = piece.shape;
+        for (var y = 0; y < sh.length; y++) {
+          for (var x = 0; x < sh[y].length; x++) {
+            if (sh[y][x]) drawBlock(ctx, piece.x + x, piece.y + y, COLORS[sh[y][x]], BLOCK);
+          }
+        }
+      }
+    }
+
+    function drawNext() {
+      nctx.fillStyle = '#000';
+      nctx.fillRect(0, 0, 60, 60);
+      if (!next) return;
+      var sh = next.shape, cell = 12;
+      var ox = (60 - sh[0].length * cell) / 2;
+      var oy = (60 - sh.length * cell) / 2;
+      for (var y = 0; y < sh.length; y++) {
+        for (var x = 0; x < sh[y].length; x++) {
+          if (sh[y][x]) {
+            nctx.fillStyle = COLORS[sh[y][x]];
+            nctx.fillRect(ox + x * cell, oy + y * cell, cell - 1, cell - 1);
+          }
+        }
+      }
+    }
+
+    function updateUI() {
+      document.getElementById('score').textContent = score;
+      document.getElementById('level').textContent = level;
+      document.getElementById('lines').textContent = lines;
+    }
+
+    function spawn() {
+      piece = next || randomPiece();
+      next = randomPiece();
+      piece.x = Math.floor((COLS - piece.shape[0].length) / 2);
+      piece.y = 0;
+      if (collide()) gameOver();
+      drawNext();
+    }
+
+    function drop() {
+      piece.y++;
+      if (collide()) {
+        piece.y--;
+        merge();
+        clearLines();
+        spawn();
+      }
+      dropCounter = 0;
+    }
+
+    function hardDrop() {
+      while (!collide()) piece.y++;
+      piece.y--;
+      merge();
+      clearLines();
+      spawn();
+      score += 2;
+      updateUI();
+    }
+
+    function move(dir) {
+      piece.x += dir;
+      if (collide()) piece.x -= dir;
+      draw();
+    }
+
+    function rotate() {
+      var old = piece.shape;
+      piece.shape = rotateMatrix(piece.shape);
+      if (collide()) {
+        piece.x++;
+        if (collide()) {
+          piece.x -= 2;
+          if (collide()) {
+            piece.x++;
+            piece.shape = old;
+          }
+        }
+      }
+      draw();
+    }
+
+    function gameOver() {
+      running = false;
+      document.getElementById('finalScore').textContent = score;
+      document.getElementById('gameOverOverlay').style.display = 'flex';
+    }
+
+    function start() {
+      board = createBoard();
+      score = 0; lines = 0; level = 1; dropInterval = 1000;
+      running = true;
+      document.getElementById('startOverlay').style.display = 'none';
+      document.getElementById('gameOverOverlay').style.display = 'none';
+      next = randomPiece();
+      spawn();
+      lastTime = Date.now();
+      dropCounter = 0;
+      updateUI();
+      resize();
+      loop();
+    }
+
+    function loop() {
+      if (!running) return;
+      var now = Date.now();
+      dropCounter += now - lastTime;
+      lastTime = now;
+      if (dropCounter > dropInterval) drop();
+      draw();
+      setTimeout(loop, 30);
+    }
+
+    // Buttons
+    function bind(id, fn) {
+      var el = document.getElementById(id);
+      el.addEventListener('click', function(e) { e.preventDefault(); if (running) fn(); });
+      el.addEventListener('touchstart', function(e) { e.preventDefault(); if (running) fn(); }, {passive: false});
+    }
+
+    bind('leftBtn', function() { move(-1); });
+    bind('rightBtn', function() { move(1); });
+    bind('rotateBtn', function() { rotate(); });
+    bind('downBtn', function() { drop(); score++; updateUI(); });
+
+    var holdTimer;
+    document.getElementById('downBtn').addEventListener('touchstart', function() {
+      holdTimer = setTimeout(function() { if (running) hardDrop(); }, 450);
+    }, {passive: false});
+    document.getElementById('downBtn').addEventListener('touchend', function() { clearTimeout(holdTimer); });
+
+    document.getElementById('startBtn').addEventListener('click', start);
+    document.getElementById('startBtn').addEventListener('touchstart', function(e) { e.preventDefault(); start(); }, {passive: false});
+    document.getElementById('againBtn').addEventListener('click', start);
+    document.getElementById('againBtn').addEventListener('touchstart', function(e) { e.preventDefault(); start(); }, {passive: false});
+    document.getElementById('newGameBtn').addEventListener('click', start);
+    document.getElementById('newGameBtn').addEventListener('touchstart', function(e) { e.preventDefault(); start(); }, {passive: false});
+
+    // Keyboard
+    document.addEventListener('keydown', function(e) {
+      if (!running) return;
+      if (e.key === 'ArrowLeft') move(-1);
+      if (e.key === 'ArrowRight') move(1);
+      if (e.key === 'ArrowUp') rotate();
+      if (e.key === 'ArrowDown') { drop(); score++; updateUI(); }
+      if (e.key === ' ') { e.preventDefault(); hardDrop(); }
+    });
+
+    window.addEventListener('resize', resize);
+    document.getElementById('startOverlay').style.display = 'flex';
+    resize();
+
+  } catch (err) {
+    var box = document.getElementById('errorBox');
+    box.style.display = 'block';
+    box.textContent = 'Ошибка: ' + err.message;
+  }
+})();
+</script>
+</body>
+</html>
